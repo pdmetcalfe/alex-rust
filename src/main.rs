@@ -1,3 +1,4 @@
+use futures::future::FutureExt;
 use futures::stream::{self, StreamExt};
 use reqwest::{Client};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
@@ -5,7 +6,6 @@ use scraper::{Selector, Html};
 use tokio::fs::File;
 use tokio::io::{self, AsyncWriteExt};
 
-use std::io::ErrorKind;
 
 use thiserror::Error;
 
@@ -17,6 +17,8 @@ enum Error {
     IO(#[from] io::Error),
     #[error("parse failure")]
     Parse,
+    #[error("unknown file type")]
+    FileType
 }
 
 #[derive(Debug, Clone)]
@@ -27,16 +29,16 @@ struct AlexFetcher {
     img_selector: Selector,
 }
 
-fn get_end(v: &HeaderValue) -> &str {
-    match v.to_str() {
-	Ok("image/png") => &"png",
-	Ok("image/jpg") => &"jpg",
-	Ok("image/gif") => &"gif",
-	Ok("image/jpeg") => &"jpg",
-	_            => {
-	    &"unknown"
-	}
-    }
+fn get_end(v: &HeaderValue) -> Result<&str, Error> {
+    v.to_str()
+	.map_err(|_| Error::FileType)
+	.and_then(|x| match x {
+	    "image/png" => Ok("png"),
+	    "image/jpg" => Ok("jpg"),
+	    "image/gif" => Ok("gif"),
+	    "image/jpeg" => Ok("jpg"),
+	    _ => Err(Error::FileType)
+	})
 }
 
 impl AlexFetcher {
@@ -49,7 +51,7 @@ impl AlexFetcher {
 	    .ok_or(Error::Parse)
     }
 
-    async fn fetch_image(&self, idx: i32, img: ImgUrl) -> Result<i32, Error> {
+    async fn fetch_image(&self, idx: i32, img: ImgUrl) -> Result<(), Error> {
 	let mut res = self.http_client.get(&img.0)
 	    .send()
 	    .await?
@@ -57,17 +59,20 @@ impl AlexFetcher {
 	let mine = res
 	    .headers()
 	    .get(CONTENT_TYPE)
-	    .map(get_end)
-	    .unwrap_or("unknown");
-	let s = format!("out/{}.{}", idx, mine);
+	    .ok_or(Error::FileType)
+	    .and_then(get_end)?;
+
+	let s = format!("out/{:04}", 100 * (idx / 100));
+	tokio::fs::create_dir_all(&s).await?;
+	let s = format!("{}/{:04}.{}", &s, idx, mine);
 	
-	let mut dest = File::create(s).await?;
+	let mut dest = File::create(&s).await?;
 
 	while let Some(chunk) = res.chunk().await? {
 	    dest.write_all(&chunk).await?;
 	}
 	
-	Ok(idx)
+	Ok(())
     }
     
     async fn fetch_index(&self, index: i32) -> Result<ImgUrl, Error> {
@@ -82,16 +87,17 @@ impl AlexFetcher {
 	self.extract_url(&text)
     }
 
-    async fn fetch(&self, index: i32) -> Result<i32, Error> {
+    async fn fetch(&self, index: i32) -> Result<(), Error> {
 	let url = self.fetch_index(index).await?;
 	self.fetch_image(index, url).await
     }
 
-    async fn full_fetch(&self, index:i32) {
+    async fn full_fetch(&self, index:i32) -> Result<(), Error> {
 	let mut stdout = tokio::io::stdout();
-	stdout.write_all(format!("Beginning {}\n", index).as_bytes()).await;
-	let res = self.fetch(index).await;
-	stdout.write_all(format!("{:?}\n", res).as_bytes()).await;
+	stdout.write_all(format!("Beginning {}\n", index).as_bytes()).await?;
+	self.fetch(index).await?;
+	stdout.write_all(format!("Completed {}\n", index).as_bytes()).await?;
+	Ok(())
     }
     
     fn new() -> Self {
@@ -108,15 +114,9 @@ impl AlexFetcher {
 #[tokio::main()]
 async fn main() {
     let fetcher = AlexFetcher::new();
-
-    if let Err(e) = tokio::fs::create_dir("out").await {
-	if e.kind() != ErrorKind::AlreadyExists {
-	    return
-	}
-    }
     
     stream::iter(1..8000_i32)
-	.for_each_concurrent(Some(100), |x| fetcher.full_fetch(x))
+	.for_each_concurrent(Some(10), |x| fetcher.full_fetch(x).map(|_| ()))
 	.await;
 }
 
