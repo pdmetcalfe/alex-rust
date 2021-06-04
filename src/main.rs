@@ -1,3 +1,5 @@
+mod store;
+
 use futures::future::FutureExt;
 use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
@@ -108,7 +110,7 @@ impl AlexFetcher {
     }
 
     fn new() -> Self {
-        let http_client = Client::builder().use_rustls_tls().build().unwrap();
+        let http_client = Client::builder().build().unwrap();
         let img_selector = Selector::parse("div.strip>img").unwrap();
         AlexFetcher {
             http_client,
@@ -120,8 +122,9 @@ impl AlexFetcher {
 #[tokio::main()]
 async fn main() {
     let fetcher = AlexFetcher::new();
+    let contents = crate::store::Contents::new();
 
-    stream::iter(1..8000_i32)
+    stream::iter((1..8000_i32).into_iter().filter(|x| !contents.contains(x)))
         .for_each_concurrent(Some(10), |x| fetcher.full_fetch(x).map(|_| ()))
         .await;
 }
