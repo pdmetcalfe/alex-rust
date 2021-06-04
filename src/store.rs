@@ -43,7 +43,7 @@ impl Storer {
         let s = format!("{}/{:04}.{}", &s, target, extension);
 
         Ok(Storer {
-            dst: File::from_std(std::fs::File::create(&s).unwrap()),
+            dst: File::from_std(std::fs::File::create(&s)?),
         })
     }
 
