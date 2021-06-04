@@ -1,12 +1,10 @@
 mod store;
 
-use futures::future::FutureExt;
 use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::io;
-use tokio::io::AsyncWriteExt;
 
 use thiserror::Error;
 
@@ -22,6 +20,8 @@ enum Error {
     FileType,
 }
 
+type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug, Clone)]
 struct ImgUrl(String);
 
@@ -30,7 +30,7 @@ struct AlexFetcher {
     img_selector: Selector,
 }
 
-fn get_end(v: &HeaderValue) -> Result<&str, Error> {
+fn get_end(v: &HeaderValue) -> Result<&str> {
     v.to_str()
         .map_err(|_| Error::FileType)
         .and_then(|x| match x {
@@ -43,7 +43,7 @@ fn get_end(v: &HeaderValue) -> Result<&str, Error> {
 }
 
 impl AlexFetcher {
-    fn extract_url(&self, doc: &str) -> Result<ImgUrl, Error> {
+    fn extract_url(&self, doc: &str) -> Result<ImgUrl> {
         let parsed = Html::parse_document(doc);
         parsed
             .select(&self.img_selector)
@@ -53,7 +53,7 @@ impl AlexFetcher {
             .ok_or(Error::Parse)
     }
 
-    async fn fetch_image(&self, idx: i32, img: ImgUrl) -> Result<(), Error> {
+    async fn fetch_image(&self, idx: i32, img: ImgUrl) -> Result<()> {
         let mut res = self
             .http_client
             .get(&img.0)
@@ -75,7 +75,7 @@ impl AlexFetcher {
         Ok(())
     }
 
-    async fn fetch_index(&self, index: i32) -> Result<ImgUrl, Error> {
+    async fn fetch_index(&self, index: i32) -> Result<ImgUrl> {
         let text = self
             .http_client
             .get("https://www.alexcartoon.com/index.cfm")
@@ -88,21 +88,18 @@ impl AlexFetcher {
         self.extract_url(&text)
     }
 
-    async fn fetch(&self, index: i32) -> Result<(), Error> {
+    async fn raw_fetch(&self, index: i32) -> Result<()> {
         let url = self.fetch_index(index).await?;
         self.fetch_image(index, url).await
     }
 
-    async fn full_fetch(&self, index: i32) -> Result<(), Error> {
-        let mut stdout = tokio::io::stdout();
-        stdout
-            .write_all(format!("Beginning {}\n", index).as_bytes())
-            .await?;
-        self.fetch(index).await?;
-        stdout
-            .write_all(format!("Completed {}\n", index).as_bytes())
-            .await?;
-        Ok(())
+    async fn fetch(&self, index:i32) {
+        println!("Beginning {}", index);
+        if let Err(x) = self.raw_fetch(index).await {
+            println!("{}", x);
+        } else {
+            println!("Completed {}", index);
+        }
     }
 
     fn new() -> Self {
@@ -118,9 +115,9 @@ impl AlexFetcher {
 #[tokio::main()]
 async fn main() {
     let fetcher = AlexFetcher::new();
-    let contents = crate::store::Contents::new();
+    let contents = store::Contents::new();
 
     stream::iter((1..8000_i32).into_iter().filter(|x| !contents.contains(x)))
-        .for_each_concurrent(Some(10), |x| fetcher.full_fetch(x).map(|_| ()))
+        .for_each_concurrent(Some(10), |x| fetcher.fetch(x))
         .await;
 }
