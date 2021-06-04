@@ -93,12 +93,11 @@ impl AlexFetcher {
         self.fetch_image(index, url).await
     }
 
-    async fn fetch(&self, index:i32) {
+    async fn fetch(&self, index: i32) {
         println!("Beginning {}", index);
-        if let Err(x) = self.raw_fetch(index).await {
-            println!("{}", x);
-        } else {
-            println!("Completed {}", index);
+        match self.raw_fetch(index).await {
+            Ok(_) => println!("Completed {}", index),
+            Err(x) => println!("Failed {}: {}", index, x),
         }
     }
 
