@@ -5,8 +5,8 @@ use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use scraper::{Html, Selector};
-use tokio::fs::File;
-use tokio::io::{self, AsyncWriteExt};
+use std::io;
+use tokio::io::AsyncWriteExt;
 
 use thiserror::Error;
 
@@ -66,14 +66,10 @@ impl AlexFetcher {
             .ok_or(Error::FileType)
             .and_then(get_end)?;
 
-        let s = format!("out/{:04}", 100 * (idx / 100));
-        tokio::fs::create_dir_all(&s).await?;
-        let s = format!("{}/{:04}.{}", &s, idx, mine);
-
-        let mut dest = File::create(&s).await?;
+        let mut storer: store::Storer = store::Storer::new(&idx, mine)?;
 
         while let Some(chunk) = res.chunk().await? {
-            dest.write_all(&chunk).await?;
+            storer.store(&chunk).await?;
         }
 
         Ok(())

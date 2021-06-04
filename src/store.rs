@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use walkdir::WalkDir;
 
 pub struct Contents {
@@ -21,5 +23,31 @@ impl Contents {
 
     pub fn contains(&self, x: &i32) -> bool {
         self.store.contains(x)
+    }
+}
+
+impl Default for Contents {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct Storer {
+    dst: File,
+}
+
+impl Storer {
+    pub fn new(target: &i32, extension: &str) -> Result<Self, std::io::Error> {
+        let s = format!("out/{:04}", 100 * (target / 100));
+        std::fs::create_dir_all(&s)?;
+        let s = format!("{}/{:04}.{}", &s, target, extension);
+
+        Ok(Storer {
+            dst: File::from_std(std::fs::File::create(&s).unwrap()),
+        })
+    }
+
+    pub async fn store(&mut self, payload: &[u8]) -> Result<(), std::io::Error> {
+        self.dst.write_all(payload).await
     }
 }
