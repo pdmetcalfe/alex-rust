@@ -12,9 +12,8 @@ impl Contents {
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
-                .filter_map(|e| {
-                    let name = e.path().file_stem()?.to_str()?;
-                    name.parse::<i32>().ok()
+                .filter_map(|e| -> Option<i32> {
+                    e.path().file_stem()?.to_str()?.parse::<i32>().ok()
                 })
                 .collect(),
         }
