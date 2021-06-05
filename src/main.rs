@@ -5,8 +5,20 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::io;
+use structopt::StructOpt;
 
 use thiserror::Error;
+#[derive(StructOpt)]
+#[structopt(name = "Alex fetcher", about = "Screen scrape all the alex cartoons")]
+struct Config {
+    /// number of asynchronous workers
+    #[structopt(short, long, default_value = "10")]
+    parallel: usize,
+
+    /// output directory
+    #[structopt(default_value = "out")]
+    target: std::path::PathBuf,
+}
 
 #[derive(Error, Debug)]
 enum Error {
@@ -25,9 +37,10 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone)]
 struct ImgUrl(String);
 
-struct AlexFetcher {
+struct AlexFetcher<'a> {
     http_client: Client,
     img_selector: Selector,
+    target: &'a std::path::Path,
 }
 
 fn get_end(v: &HeaderValue) -> Result<&str> {
@@ -42,7 +55,7 @@ fn get_end(v: &HeaderValue) -> Result<&str> {
         })
 }
 
-impl AlexFetcher {
+impl<'a> AlexFetcher<'a> {
     fn extract_url(&self, doc: &str) -> Result<ImgUrl> {
         let parsed = Html::parse_document(doc);
         parsed
@@ -66,7 +79,7 @@ impl AlexFetcher {
             .ok_or(Error::FileType)
             .and_then(get_end)?;
 
-        let mut storer: store::Storer = store::Storer::new(&idx, mine)?;
+        let mut storer: store::Storer = store::Storer::new(self.target, &idx, mine)?;
 
         while let Some(chunk) = res.chunk().await? {
             storer.store(&chunk).await?;
@@ -101,22 +114,25 @@ impl AlexFetcher {
         }
     }
 
-    fn new() -> Self {
+    fn new(target: &'a std::path::Path) -> Self {
         let http_client = Client::builder().build().unwrap();
         let img_selector = Selector::parse("div.strip>img").unwrap();
         AlexFetcher {
             http_client,
             img_selector,
+            target,
         }
     }
 }
 
 #[tokio::main()]
 async fn main() {
-    let fetcher = AlexFetcher::new();
-    let contents = store::Contents::new();
+    let opts = Config::from_args();
+    std::fs::create_dir_all(&opts.target).unwrap();
+    let contents = store::Contents::new(&opts.target);
+    let fetcher = AlexFetcher::new(&opts.target);
 
     stream::iter((1..8000_i32).into_iter().filter(|x| !contents.contains(x)))
-        .for_each_concurrent(Some(10), |x| fetcher.fetch(x))
+        .for_each_concurrent(Some(opts.parallel), |x| fetcher.fetch(x))
         .await;
 }

@@ -8,9 +8,9 @@ pub struct Contents {
 }
 
 impl Contents {
-    pub fn new() -> Self {
+    pub fn new(target: &std::path::Path) -> Self {
         Contents {
-            store: WalkDir::new("out")
+            store: WalkDir::new(target)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
@@ -26,21 +26,19 @@ impl Contents {
     }
 }
 
-impl Default for Contents {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub struct Storer {
     dst: File,
 }
 
 impl Storer {
-    pub fn new(target: &i32, extension: &str) -> Result<Self, std::io::Error> {
-        let s = format!("out/{:04}", 100 * (target / 100));
+    pub fn new(
+        out_dir: &std::path::Path,
+        target: &i32,
+        extension: &str,
+    ) -> Result<Self, std::io::Error> {
+        let s = out_dir.join(format!("{:04}", 100 * (target / 100)));
         std::fs::create_dir_all(&s)?;
-        let s = format!("{}/{:04}.{}", &s, target, extension);
+        let s = s.join(format!("{:04}.{}", target, extension));
 
         Ok(Storer {
             dst: File::from_std(std::fs::File::create(&s)?),
