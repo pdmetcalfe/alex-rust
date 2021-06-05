@@ -8,8 +8,8 @@ edition = "2018"
 
 [dependencies]
 walkdir = "2"
-reqwest = { version = "0.11.3", features = ["stream", "rustls-tls"] }
+reqwest = { version = "0.11", features = ["stream", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
-scraper = { version = "0.12.0"}
-futures = { version = "0.3.15" }
-thiserror = { version = "1.0.20" }
+scraper = { version = "0.12"}
+futures = { version = "0.3" }
+thiserror = { version = "1.0" }
