@@ -33,12 +33,12 @@ pub struct Storer {
 impl Storer {
     pub fn new(
         out_dir: &std::path::Path,
-        target: &i32,
+        target: chrono::NaiveDate,
         extension: &str,
     ) -> Result<Self, std::io::Error> {
-        let s = out_dir.join(format!("{:04}", 100 * (target / 100)));
+        let s = out_dir.join(format!("{}", target.format("%Y")));
         std::fs::create_dir_all(&s)?;
-        let s = s.join(format!("{:04}.{}", target, extension));
+        let s = s.join(format!("{}.{}", target.format("%Y-%m-%d"), extension));
 
         Ok(Storer {
             dst: File::from_std(std::fs::File::create(&s)?),

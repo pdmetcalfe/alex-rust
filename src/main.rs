@@ -1,4 +1,6 @@
+mod db;
 mod store;
+mod par_db;
 
 use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
@@ -40,6 +42,7 @@ struct ImgUrl(String);
 struct AlexFetcher<'a> {
     http_client: Client,
     img_selector: Selector,
+    date_selector: Selector,
     target: &'a std::path::Path,
 }
 
@@ -56,17 +59,26 @@ fn get_end(v: &HeaderValue) -> Result<&str> {
 }
 
 impl<'a> AlexFetcher<'a> {
-    fn extract_url(&self, doc: &str) -> Result<ImgUrl> {
+    fn extract_url(&self, doc: &str) -> Result<(ImgUrl, chrono::NaiveDate)> {
         let parsed = Html::parse_document(doc);
-        parsed
+        let url = parsed
             .select(&self.img_selector)
             .next()
             .and_then(|x| x.value().attr("src"))
             .map(|x| ImgUrl(String::from(x)))
-            .ok_or(Error::Parse)
+            .ok_or(Error::Parse)?;
+        let date = parsed
+            .select(&self.date_selector)
+            .next()
+            .and_then(|x| {
+                let t: String = x.text().collect();
+                chrono::NaiveDate::parse_from_str(&t, "%A, %-d %B %Y").ok()
+            })
+            .ok_or(Error::Parse)?;
+        Ok((url, date))
     }
 
-    async fn fetch_image(&self, idx: i32, img: ImgUrl) -> Result<()> {
+    async fn fetch_image(&self, date: chrono::NaiveDate, img: ImgUrl) -> Result<()> {
         let mut res = self
             .http_client
             .get(&img.0)
@@ -79,7 +91,7 @@ impl<'a> AlexFetcher<'a> {
             .ok_or(Error::FileType)
             .and_then(get_end)?;
 
-        let mut storer: store::Storer = store::Storer::new(self.target, &idx, mine)?;
+        let mut storer: store::Storer = store::Storer::new(self.target, date, mine)?;
 
         while let Some(chunk) = res.chunk().await? {
             storer.store(&chunk).await?;
@@ -88,7 +100,7 @@ impl<'a> AlexFetcher<'a> {
         Ok(())
     }
 
-    async fn fetch_index(&self, index: i32) -> Result<ImgUrl> {
+    async fn fetch_index(&self, index: i32) -> Result<(ImgUrl, chrono::NaiveDate)> {
         let text = self
             .http_client
             .get("https://www.alexcartoon.com/index.cfm")
@@ -101,25 +113,33 @@ impl<'a> AlexFetcher<'a> {
         self.extract_url(&text)
     }
 
-    async fn raw_fetch(&self, index: i32) -> Result<()> {
-        let url = self.fetch_index(index).await?;
-        self.fetch_image(index, url).await
+    async fn raw_fetch(&self, index: i32) -> Result<chrono::NaiveDate> {
+        let (url, date) = self.fetch_index(index).await?;
+        self.fetch_image(date, url).await?;
+        Ok(date)
     }
 
-    async fn fetch(&self, index: i32) {
-        println!("Beginning {}", index);
-        match self.raw_fetch(index).await {
-            Ok(_) => println!("Completed {}", index),
-            Err(x) => println!("Failed {}: {}", index, x),
-        }
+    async fn fetch(&self, index: i32, db_client: par_db::ParDbClient) {
+       if db_client.cartoon_date(index).await.unwrap().is_none() {
+            println!("Beginning {}", index);
+            match self.raw_fetch(index).await {
+                Ok(date) => {
+                    db_client.add_cartoon(par_db::IndexEntry::new(index, date)).await.unwrap();
+                    println!("Completed {} ({})", index, date);
+                },
+                Err(x) => println!("Failed {}: {}", index, x),
+            }
+        } 
     }
 
     fn new(target: &'a std::path::Path) -> Self {
         let http_client = Client::builder().build().unwrap();
         let img_selector = Selector::parse("div.strip>img").unwrap();
+        let date_selector = Selector::parse("div.date>h2").unwrap();
         AlexFetcher {
             http_client,
             img_selector,
+            date_selector,
             target,
         }
     }
@@ -129,10 +149,13 @@ impl<'a> AlexFetcher<'a> {
 async fn main() {
     let opts = Config::from_args();
     std::fs::create_dir_all(&opts.target).unwrap();
-    let contents = store::Contents::new(&opts.target);
+    let database = db::Database::new(opts.target.join("index.db")).unwrap();
+    let (client, server) = par_db::new(database);
     let fetcher = AlexFetcher::new(&opts.target);
-
-    stream::iter((1..8000_i32).into_iter().filter(|x| !contents.contains(x)))
-        .for_each_concurrent(Some(opts.parallel), |x| fetcher.fetch(x))
+    let server_run = server.run();
+    stream::iter((1..8000_i32).into_iter())
+        .for_each_concurrent(Some(opts.parallel), |x| fetcher.fetch(x, client.clone()))
         .await;
+    drop(client);
+    server_run.await.unwrap();
 }
