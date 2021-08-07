@@ -1,15 +1,15 @@
 mod store;
 
 use futures::stream::{FuturesUnordered, StreamExt};
+use rand::seq::SliceRandom;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::io;
 use std::path::Path;
+use store::{Contents, Storer};
 use structopt::StructOpt;
 use thiserror::Error;
-use rand::seq::SliceRandom;
-use store::{Contents, Storer};
 
 #[derive(StructOpt)]
 #[structopt(name = "Alex fetcher", about = "Screen scrape all the alex cartoons")]
@@ -181,13 +181,12 @@ async fn main() {
     let fetcher = AlexFetcher::new(&opts.target);
     let mut to_do = {
         let mut src = (1..8000_i32)
-        .into_iter()
-        .filter(|x| !contents.contains(x))
-        .map(|x| fetcher.fetch(x))
-        .collect::<Vec<_>>();
+            .into_iter()
+            .filter(|x| !contents.contains(x))
+            .collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         src.shuffle(&mut rng);
-        src.into_iter()
+        src.into_iter().map(|x| fetcher.fetch(x)).fuse()
     };
     let mut workers: FuturesUnordered<_> = to_do.by_ref().take(opts.parallel).collect();
     while let Some(item) = workers.next().await {

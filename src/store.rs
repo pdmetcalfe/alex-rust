@@ -33,6 +33,12 @@ pub struct Storer {
     dst: File,
 }
 
+impl<I: Into<File>> From<I> for Storer {
+    fn from(dst: I) -> Self {
+        Storer { dst: dst.into() }
+    }
+}
+
 impl Storer {
     pub fn new(
         out_dir: &std::path::Path,
@@ -43,9 +49,7 @@ impl Storer {
         std::fs::create_dir_all(&s)?;
         let s = s.join(format!("{}.{}", target.format("%Y-%m-%d"), extension));
 
-        Ok(Storer {
-            dst: File::from_std(std::fs::File::create(&s)?),
-        })
+        Ok(Storer::from(std::fs::File::create(&s)?))
     }
 
     pub async fn store(&mut self, payload: &[u8]) -> Result<(), std::io::Error> {
