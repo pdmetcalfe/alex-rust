@@ -1,15 +1,16 @@
-mod db;
 mod store;
-mod par_db;
 
-use futures::stream::{self, StreamExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use std::io;
+use std::path::Path;
 use structopt::StructOpt;
-
 use thiserror::Error;
+
+use store::{Contents, Storer};
+
 #[derive(StructOpt)]
 #[structopt(name = "Alex fetcher", about = "Screen scrape all the alex cartoons")]
 struct Config {
@@ -91,7 +92,7 @@ impl<'a> AlexFetcher<'a> {
             .ok_or(Error::FileType)
             .and_then(get_end)?;
 
-        let mut storer: store::Storer = store::Storer::new(self.target, date, mine)?;
+        let mut storer: Storer = Storer::new(self.target, date, mine)?;
 
         while let Some(chunk) = res.chunk().await? {
             storer.store(&chunk).await?;
@@ -119,17 +120,18 @@ impl<'a> AlexFetcher<'a> {
         Ok(date)
     }
 
-    async fn fetch(&self, index: i32, db_client: par_db::ParDbClient) {
-       if db_client.cartoon_date(index).await.unwrap().is_none() {
-            println!("Beginning {}", index);
-            match self.raw_fetch(index).await {
-                Ok(date) => {
-                    db_client.add_cartoon(par_db::IndexEntry::new(index, date)).await.unwrap();
-                    println!("Completed {} ({})", index, date);
-                },
-                Err(x) => println!("Failed {}: {}", index, x),
+    async fn fetch(&self, index: i32) -> Option<i32> {
+        println!("Beginning {}", index);
+        match self.raw_fetch(index).await {
+            Ok(date) => {
+                println!("Completed {} ({})", index, date);
+                Some(index)
             }
-        } 
+            Err(x) => {
+                println!("Failed {}: {}", index, x);
+                None
+            }
+        }
     }
 
     fn new(target: &'a std::path::Path) -> Self {
@@ -145,17 +147,48 @@ impl<'a> AlexFetcher<'a> {
     }
 }
 
+fn read_contents<P: AsRef<Path>>(path: P) -> Result<Contents> {
+    let src = std::fs::OpenOptions::new()
+        .read(true)
+        .write(false)
+        .open(path);
+    match src {
+        Err(_) => Ok(Default::default()),
+        Ok(handle) => {
+            let buf = std::io::BufReader::new(handle);
+            serde_json::from_reader(buf).map_err(|_| Error::FileType)
+        }
+    }
+}
+
+fn store_contents<P: AsRef<Path>>(contents: &Contents, path: P) -> Result<()> {
+    let dst = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    let writer = std::io::BufWriter::new(dst);
+    serde_json::to_writer(writer, contents).unwrap();
+    Ok(())
+}
+
 #[tokio::main()]
 async fn main() {
     let opts = Config::from_args();
     std::fs::create_dir_all(&opts.target).unwrap();
-    let database = db::Database::new(opts.target.join("index.db")).unwrap();
-    let (client, server) = par_db::new(database);
+    let out_file = opts.target.join("index.txt");
+    let mut contents = read_contents(&out_file).unwrap();
     let fetcher = AlexFetcher::new(&opts.target);
-    let server_run = server.run();
-    stream::iter((1..8000_i32).into_iter())
-        .for_each_concurrent(Some(opts.parallel), |x| fetcher.fetch(x, client.clone()))
-        .await;
-    drop(client);
-    server_run.await.unwrap();
+    let mut to_do = (1..8000_i32)
+        .into_iter()
+        .filter(|x| !contents.contains(x))
+        .map(|x| fetcher.fetch(x))
+        .collect::<Vec<_>>()
+        .into_iter();
+    let mut workers: FuturesUnordered<_> = to_do.by_ref().take(opts.parallel).collect();
+    while let Some(item) = workers.next().await {
+        contents.extend(item);
+        workers.extend(to_do.next());
+    }
+    store_contents(&contents, &out_file).unwrap();
 }

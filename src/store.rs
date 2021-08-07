@@ -1,28 +1,31 @@
+use core::iter::{Extend, FromIterator};
 use std::collections::HashSet;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use walkdir::WalkDir;
 
-pub struct Contents {
-    store: HashSet<i32>,
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct Contents(HashSet<i32>);
+
+impl Extend<i32> for Contents {
+    fn extend<T: IntoIterator<Item = i32>>(&mut self, iter: T) {
+        self.0.extend(iter);
+    }
+}
+
+impl FromIterator<i32> for Contents {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = i32>,
+    {
+        Contents(iter.into_iter().collect())
+    }
 }
 
 impl Contents {
-    pub fn new(target: &std::path::Path) -> Self {
-        Contents {
-            store: WalkDir::new(target)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .filter_map(|e| -> Option<i32> {
-                    e.path().file_stem()?.to_str()?.parse::<i32>().ok()
-                })
-                .collect(),
-        }
-    }
-
     pub fn contains(&self, x: &i32) -> bool {
-        self.store.contains(x)
+        self.0.contains(x)
     }
 }
 
