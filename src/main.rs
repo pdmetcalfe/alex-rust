@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 use structopt::StructOpt;
 use thiserror::Error;
-
+use rand::seq::SliceRandom;
 use store::{Contents, Storer};
 
 #[derive(StructOpt)]
@@ -179,12 +179,16 @@ async fn main() {
     let out_file = opts.target.join("index.txt");
     let mut contents = read_contents(&out_file).unwrap();
     let fetcher = AlexFetcher::new(&opts.target);
-    let mut to_do = (1..8000_i32)
+    let mut to_do = {
+        let mut src = (1..8000_i32)
         .into_iter()
         .filter(|x| !contents.contains(x))
         .map(|x| fetcher.fetch(x))
-        .collect::<Vec<_>>()
-        .into_iter();
+        .collect::<Vec<_>>();
+        let mut rng = rand::thread_rng();
+        src.shuffle(&mut rng);
+        src.into_iter()
+    };
     let mut workers: FuturesUnordered<_> = to_do.by_ref().take(opts.parallel).collect();
     while let Some(item) = workers.next().await {
         contents.extend(item);
