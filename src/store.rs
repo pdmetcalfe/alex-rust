@@ -1,5 +1,5 @@
 use core::iter::{Extend, FromIterator};
-use std::collections::HashSet;
+use std::collections::{hash_set, HashSet};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -11,6 +11,14 @@ pub struct Contents(HashSet<i32>);
 impl Extend<i32> for Contents {
     fn extend<T: IntoIterator<Item = i32>>(&mut self, iter: T) {
         self.0.extend(iter);
+    }
+}
+
+impl IntoIterator for Contents {
+    type Item = i32;
+    type IntoIter = hash_set::IntoIter<i32>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 

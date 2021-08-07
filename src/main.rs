@@ -1,6 +1,6 @@
 mod store;
 
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{iter, StreamExt};
 use rand::seq::SliceRandom;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
@@ -179,19 +179,17 @@ async fn main() {
     let out_file = opts.target.join("index.txt");
     let mut contents = read_contents(&out_file).unwrap();
     let fetcher = AlexFetcher::new(&opts.target);
-    let mut to_do = {
+    let mut extras = {
         let mut src = (1..8000_i32)
             .into_iter()
             .filter(|x| !contents.contains(x))
             .collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
         src.shuffle(&mut rng);
-        src.into_iter().map(|x| fetcher.fetch(x)).fuse()
-    };
-    let mut workers: FuturesUnordered<_> = to_do.by_ref().take(opts.parallel).collect();
-    while let Some(item) = workers.next().await {
+        iter(src.into_iter().map(|x| fetcher.fetch(x)))
+    }.buffer_unordered(opts.parallel);
+    while let Some(item) = extras.next().await {
         contents.extend(item);
-        workers.extend(to_do.next());
     }
     store_contents(&contents, &out_file).unwrap();
 }
