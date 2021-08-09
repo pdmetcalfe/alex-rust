@@ -1,4 +1,7 @@
+mod extender;
 mod store;
+
+use extender::StreamExtendable;
 
 use futures::stream::{iter, StreamExt};
 use rand::seq::SliceRandom;
@@ -179,17 +182,20 @@ async fn main() {
     let out_file = opts.target.join("index.txt");
     let mut contents = read_contents(&out_file).unwrap();
     let fetcher = AlexFetcher::new(&opts.target);
-    let mut extras = {
-        let mut src = (1..8000_i32)
-            .into_iter()
-            .filter(|x| !contents.contains(x))
-            .collect::<Vec<_>>();
-        let mut rng = rand::thread_rng();
-        src.shuffle(&mut rng);
-        iter(src.into_iter().map(|x| fetcher.fetch(x)))
-    }.buffer_unordered(opts.parallel);
-    while let Some(item) = extras.next().await {
-        contents.extend(item);
-    }
+    contents
+        .stream_extend(
+            {
+                let mut src = (1..8000_i32)
+                    .into_iter()
+                    .filter(|x| !contents.contains(x))
+                    .collect::<Vec<_>>();
+                let mut rng = rand::thread_rng();
+                src.shuffle(&mut rng);
+                iter(src.into_iter().map(|x| fetcher.fetch(x)))
+            }
+            .buffer_unordered(opts.parallel),
+        )
+        .await;
+
     store_contents(&contents, &out_file).unwrap();
 }
