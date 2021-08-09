@@ -5,16 +5,11 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 pin_project! {
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
     pub struct StreamExtender<'c, A, B: ?Sized> {
         #[pin]
         stream: A,
         extendable: &'c mut B
-    }
-}
-
-impl<'c, A, B: ?Sized> StreamExtender<'c, A, B> {
-    fn new(stream: A, extendable: &'c mut B) -> Self {
-        StreamExtender { stream, extendable }
     }
 }
 
@@ -42,7 +37,10 @@ where
 
 pub trait StreamExtendable<A>: Extend<A> {
     fn stream_extend<St>(&mut self, stream: St) -> StreamExtender<'_, St, Self> {
-        StreamExtender::new(stream, self)
+        StreamExtender {
+            stream,
+            extendable: self,
+        }
     }
 }
 
