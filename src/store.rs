@@ -1,31 +1,32 @@
 use core::iter::{Extend, FromIterator};
-use std::collections::{hash_set, HashSet};
+use std::collections::{hash_map, HashMap};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use chrono::NaiveDate;
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize)]
-pub struct Contents(HashSet<i32>);
+pub struct Contents(HashMap<i32, NaiveDate>);
 
-impl Extend<i32> for Contents {
-    fn extend<T: IntoIterator<Item = i32>>(&mut self, iter: T) {
+impl Extend<(i32, chrono::NaiveDate)> for Contents {
+    fn extend<T: IntoIterator<Item = (i32, NaiveDate)>>(&mut self, iter: T) {
         self.0.extend(iter);
     }
 }
 
 impl IntoIterator for Contents {
-    type Item = i32;
-    type IntoIter = hash_set::IntoIter<i32>;
+    type IntoIter = hash_map::IntoIter<i32, NaiveDate>;
+    type Item = (i32, NaiveDate);
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl FromIterator<i32> for Contents {
+impl FromIterator<(i32, NaiveDate)> for Contents {
     fn from_iter<T>(iter: T) -> Self
     where
-        T: IntoIterator<Item = i32>,
+        T: IntoIterator<Item = (i32, NaiveDate)>,
     {
         Contents(iter.into_iter().collect())
     }
@@ -33,7 +34,7 @@ impl FromIterator<i32> for Contents {
 
 impl Contents {
     pub fn contains(&self, x: &i32) -> bool {
-        self.0.contains(x)
+        self.0.contains_key(x)
     }
 }
 

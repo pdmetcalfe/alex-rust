@@ -3,7 +3,8 @@ mod store;
 
 use extender::StreamExtendable;
 
-use futures::stream::{iter, StreamExt};
+use chrono::NaiveDate;
+use futures::{stream::iter, Future, Stream, StreamExt};
 use rand::seq::SliceRandom;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
@@ -123,18 +124,32 @@ impl<'a> AlexFetcher<'a> {
         Ok(date)
     }
 
-    async fn fetch(&self, index: i32) -> Option<i32> {
+    async fn fetch(&self, index: i32) -> Option<(i32, NaiveDate)> {
         println!("Beginning {}", index);
         match self.raw_fetch(index).await {
             Ok(date) => {
                 println!("Completed {} ({})", index, date);
-                Some(index)
+                Some((index, date))
             }
             Err(x) => {
                 println!("Failed {}: {}", index, x);
                 None
             }
         }
+    }
+
+    fn cartoons<'b: 'a>(
+        &'b self,
+        max: i32,
+        contents: &Contents,
+    ) -> impl Stream<Item = impl Future<Output = Option<(i32, NaiveDate)>> + 'b> {
+        let mut src = (1..max)
+            .into_iter()
+            .filter(|x| !contents.contains(x))
+            .collect::<Vec<_>>();
+        let mut rng = rand::thread_rng();
+        src.shuffle(&mut rng);
+        iter(src.into_iter().map(move |x| self.fetch(x)))
     }
 
     fn new(target: &'a std::path::Path) -> Self {
@@ -184,16 +199,9 @@ async fn main() {
     let fetcher = AlexFetcher::new(&opts.target);
     contents
         .stream_extend(
-            {
-                let mut src = (1..8000_i32)
-                    .into_iter()
-                    .filter(|x| !contents.contains(x))
-                    .collect::<Vec<_>>();
-                let mut rng = rand::thread_rng();
-                src.shuffle(&mut rng);
-                iter(src.into_iter().map(|x| fetcher.fetch(x)))
-            }
-            .buffer_unordered(opts.parallel),
+            fetcher
+                .cartoons(8000, &contents)
+                .buffer_unordered(opts.parallel),
         )
         .await;
 
