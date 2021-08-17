@@ -1,5 +1,6 @@
 use core::iter::{Extend, FromIterator};
 use std::collections::{hash_map, HashMap};
+use std::io::Result;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use chrono::NaiveDate;
@@ -53,7 +54,7 @@ impl Storer {
         out_dir: &std::path::Path,
         target: chrono::NaiveDate,
         extension: &str,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Result<Self> {
         let s = out_dir.join(format!("{}", target.format("%Y")));
         std::fs::create_dir_all(&s)?;
         let s = s.join(format!("{}.{}", target.format("%Y-%m-%d"), extension));
@@ -61,7 +62,7 @@ impl Storer {
         Ok(Storer::from(std::fs::File::create(&s)?))
     }
 
-    pub async fn store(&mut self, payload: &[u8]) -> Result<(), std::io::Error> {
+    pub async fn store(&mut self, payload: &[u8]) -> Result<()> {
         self.dst.write_all(payload).await
     }
 }
