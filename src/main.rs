@@ -200,7 +200,7 @@ async fn main() {
     contents
         .stream_extend(
             fetcher
-                .cartoons(8000, &contents)
+                .cartoons(9000, &contents)
                 .buffer_unordered(opts.parallel),
         )
         .await;
